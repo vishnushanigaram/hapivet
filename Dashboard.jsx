@@ -1,179 +1,104 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Stethoscope, Loader2 } from 'lucide-react';
+import { Send, Stethoscope } from 'lucide-react';
 
-const GEMINI_API_KEY = 'YOUR_GEMINI_API_KEY_HERE';
-
-const SYSTEM_PROMPT = `You are Hapivet AI, a veterinary assistant chatbot. Analyze pet health issues and respond in JSON format only.
-
-Specializations: dermatology, cardiology, orthopedics, neurology, gastroenterology, dental, ophthalmology, general
-
-Response format:
-{
-  "message": "Your friendly response to user",
-  "specialization": "detected field or null",
-  "severity": "mild/moderate/severe or null",
-  "needsAppointment": true/false,
-  "stage": "chat/ask_appointment/slot_selection/confirmed"
-}
-
-Rules:
-- Be warm, empathetic, conversational
-- Keep responses short (2-3 sentences)
-- Detect specialization from symptoms
-- mild = home care tips, severe = immediate appointment
-- If user agrees to appointment, set stage to "slot_selection"
-- Remember conversation context`;
+const SPECIALIZATIONS = {
+  dermatology: ['skin', 'fur', 'itch', 'rash', 'scratch', 'hair loss', 'bald'],
+  cardiology: ['heart', 'breath', 'tired', 'fatigue', 'cough', 'wheez'],
+  orthopedics: ['leg', 'bone', 'limp', 'walk', 'jump', 'mobility', 'pain'],
+  neurology: ['seizure', 'shake', 'confus', 'balance', 'dizzy', 'tremble'],
+  general: ['fever', 'vomit', 'appetite', 'lethargy', 'weak', 'diarrhea'],
+  dental: ['tooth', 'teeth', 'gum', 'mouth', 'breath smell', 'drool'],
+  ophthalmology: ['eye', 'vision', 'discharge', 'red eye', 'swollen eye'],
+  gastroenterology: ['stomach', 'digest', 'bloat', 'gas', 'constipat']
+};
 
 const SLOTS = ['9:00 AM', '11:00 AM', '2:00 PM', '4:00 PM', '6:00 PM', '8:00 PM'];
 
-export default function HapivetAI() {
+export default function Dashboars() {
   const [messages, setMessages] = useState([
     { role: 'bot', text: "Hi! I'm Hapivet AI 🐾 Tell me about your pet and what's bothering them." }
   ]);
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [context, setContext] = useState([]);
-  const [awaitingSlot, setAwaitingSlot] = useState(false);
-  const [currentSpec, setCurrentSpec] = useState(null);
+  const [state, setState] = useState({ stage: 'initial' });
   const chatEndRef = useRef(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const callGemini = async (userMessage) => {
-    const conversationHistory = context.map(m => 
-      `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`
-    ).join('\n');
-
-    const prompt = `${SYSTEM_PROMPT}
-
-Conversation so far:
-${conversationHistory}
-
-User: ${userMessage}
-
-Respond in valid JSON only:`;
-
-    try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.7,
-              maxOutputTokens: 500
-            }
-          })
-        }
-      );
-
-      const data = await response.json();
-      const text = data.candidates[0].content.parts[0].text;
-      
-      // Extract JSON from markdown code blocks if present
-      const jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/) || text.match(/\{[\s\S]*\}/);
-      const jsonText = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : text;
-      
-      return JSON.parse(jsonText.trim());
-    } catch (error) {
-      console.error('Gemini API Error:', error);
-      return {
-        message: "I'm having trouble connecting right now. Please describe your pet's symptoms and I'll help!",
-        specialization: null,
-        severity: null,
-        needsAppointment: false,
-        stage: 'chat'
-      };
+  const detectSpecialization = (text) => {
+    const lower = text.toLowerCase();
+    for (const [spec, keywords] of Object.entries(SPECIALIZATIONS)) {
+      if (keywords.some(kw => lower.includes(kw))) return spec;
     }
+    return 'general';
   };
 
-  const handleSlotSelection = (userInput) => {
-    const text = userInput.toLowerCase();
-    const slotIndex = parseInt(text) - 1;
-    const selectedSlot = slotIndex >= 0 && slotIndex < SLOTS.length ? SLOTS[slotIndex] : 
-                         SLOTS.find(s => text.includes(s.toLowerCase()));
-    
-    if (selectedSlot) {
-      const available = Math.random() > 0.25; // 75% availability
-      
-      if (available) {
-        const specNames = {
-          dermatology: 'Dermatology',
-          cardiology: 'Cardiology',
-          orthopedics: 'Orthopedics',
-          neurology: 'Neurology',
-          gastroenterology: 'Gastroenterology',
-          dental: 'Dental',
-          ophthalmology: 'Ophthalmology',
-          general: 'General Medicine'
-        };
-        
-        return {
-          text: `✅ Appointment confirmed!\n\n📅 Time: ${selectedSlot}\n🏥 Specialization: ${specNames[currentSpec] || 'General Medicine'}\n\nYou'll receive a confirmation shortly. Take care of your pet! 🐾`,
-          done: true
-        };
-      } else {
-        const alt = SLOTS.filter(s => s !== selectedSlot).slice(0, 3);
-        return {
-          text: `Sorry, ${selectedSlot} is fully booked. Available slots:\n${alt.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nWhich works for you?`,
-          done: false
-        };
-      }
-    } else {
-      return {
-        text: `Please choose a time slot:\n${SLOTS.map((s, i) => `${i + 1}. ${s}`).join('\n')}`,
-        done: false
-      };
-    }
+  const detectSeverity = (text) => {
+    const severe = ['blood', 'seizure', 'collapse', 'emergency', 'not moving', 'unconscious', 'severe'];
+    return severe.some(s => text.toLowerCase().includes(s)) ? 'severe' : 'mild';
   };
 
-  const handleSend = async () => {
-    if (!input.trim() || loading) return;
+  const handleSend = () => {
+    if (!input.trim()) return;
     
     const userMsg = { role: 'user', text: input };
     setMessages(prev => [...prev, userMsg]);
-    setContext(prev => [...prev, userMsg]);
-    setLoading(true);
+    
+    const text = input.toLowerCase();
+    let botReply = '';
 
-    // Handle slot selection locally
-    if (awaitingSlot) {
-      const slotResult = handleSlotSelection(input);
-      const botMsg = { role: 'bot', text: slotResult.text };
-      setMessages(prev => [...prev, botMsg]);
-      setContext(prev => [...prev, botMsg]);
+    if (state.stage === 'initial') {
+      const spec = detectSpecialization(text);
+      const severity = detectSeverity(text);
       
-      if (slotResult.done) {
-        setAwaitingSlot(false);
-        setCurrentSpec(null);
+      const specNames = {
+        dermatology: 'Dermatology (Skin)',
+        cardiology: 'Cardiology (Heart)',
+        orthopedics: 'Orthopedics (Bones)',
+        neurology: 'Neurology (Nervous System)',
+        dental: 'Dental',
+        ophthalmology: 'Ophthalmology (Eyes)',
+        gastroenterology: 'Gastroenterology (Digestive)',
+        general: 'General Medicine'
+      };
+
+      if (severity === 'severe') {
+        botReply = `This sounds serious! I recommend immediate veterinary care for ${specNames[spec]}. Would you like to book an urgent appointment? (Yes/No)`;
+        setState({ stage: 'booking', spec, severity });
+      } else {
+        botReply = `This seems like a ${specNames[spec]} issue. For mild cases:\n• Monitor your pet closely\n• Ensure they're hydrated\n• Avoid strenuous activity\n\nIf symptoms persist or worsen, I'd recommend seeing a vet. Would you like to schedule an appointment? (Yes/No)`;
+        setState({ stage: 'booking', spec, severity });
       }
+    } else if (state.stage === 'booking') {
+      if (text.includes('yes') || text.includes('book') || text.includes('appointment')) {
+        botReply = `Great! Available time slots:\n${SLOTS.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nWhich time works best for you? (Reply with number or time)`;
+        setState({ ...state, stage: 'slot_selection' });
+      } else {
+        botReply = "No problem! If things change or you have more concerns, I'm here to help. Take care of your pet! 🐾";
+        setState({ stage: 'initial' });
+      }
+    } else if (state.stage === 'slot_selection') {
+      const slotIndex = parseInt(text) - 1;
+      const selectedSlot = slotIndex >= 0 && slotIndex < SLOTS.length ? SLOTS[slotIndex] : 
+                           SLOTS.find(s => text.includes(s.toLowerCase()));
       
-      setInput('');
-      setLoading(false);
-      return;
+      if (selectedSlot) {
+        const available = Math.random() > 0.3;
+        if (available) {
+          botReply = `✅ Appointment confirmed for ${selectedSlot}!\n\nSpecialization: ${state.spec}\nYou'll receive a confirmation shortly. See you soon! 🐾`;
+          setState({ stage: 'initial' });
+        } else {
+          const alt = SLOTS.filter(s => s !== selectedSlot).slice(0, 2);
+          botReply = `Sorry, ${selectedSlot} is fully booked. How about:\n${alt.map((s, i) => `${i + 1}. ${s}`).join('\n')}`;
+        }
+      } else {
+        botReply = `I didn't catch that. Please pick a time:\n${SLOTS.map((s, i) => `${i + 1}. ${s}`).join('\n')}`;
+      }
     }
 
-    // Call Gemini for dynamic response
-    const aiResponse = await callGemini(input);
-    
-    let botText = aiResponse.message;
-
-    // Handle appointment flow
-    if (aiResponse.stage === 'slot_selection') {
-      botText += `\n\nAvailable time slots:\n${SLOTS.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nWhich time works best?`;
-      setAwaitingSlot(true);
-      setCurrentSpec(aiResponse.specialization);
-    }
-
-    const botMsg = { role: 'bot', text: botText };
-    setMessages(prev => [...prev, botMsg]);
-    setContext(prev => [...prev, botMsg]);
-    
+    setMessages(prev => [...prev, { role: 'bot', text: botReply }]);
     setInput('');
-    setLoading(false);
   };
 
   return (
@@ -182,7 +107,7 @@ Respond in valid JSON only:`;
         <Stethoscope className="text-green-600" size={32} />
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Hapivet AI</h1>
-          <p className="text-sm text-gray-600">Powered by Gemini API</p>
+          <p className="text-sm text-gray-600">Your Pet's Health Assistant</p>
         </div>
       </div>
 
@@ -198,13 +123,6 @@ Respond in valid JSON only:`;
             </div>
           </div>
         ))}
-        {loading && (
-          <div className="flex justify-start">
-            <div className="bg-white px-4 py-2 rounded-2xl shadow">
-              <Loader2 className="animate-spin text-green-600" size={20} />
-            </div>
-          </div>
-        )}
         <div ref={chatEndRef} />
       </div>
 
@@ -217,19 +135,14 @@ Respond in valid JSON only:`;
             onKeyPress={(e) => e.key === 'Enter' && handleSend()}
             placeholder="Describe your pet's symptoms..."
             className="flex-1 px-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-green-500"
-            disabled={loading}
           />
           <button
             onClick={handleSend}
-            disabled={loading}
-            className="bg-green-600 text-white p-2 rounded-full hover:bg-green-700 transition disabled:opacity-50"
+            className="bg-green-600 text-white p-2 rounded-full hover:bg-green-700 transition"
           >
             <Send size={20} />
           </button>
         </div>
-        <p className="text-xs text-gray-500 mt-2 text-center">
-          Replace YOUR_GEMINI_API_KEY_HERE with your actual key
-        </p>
       </div>
     </div>
   );
