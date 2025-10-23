@@ -147,5 +147,5 @@ Would you like to book a check-up with our cardiology specialist?
 
 1. Clone the repository  
    ```bash
-   git clone https://github.com/your-username/hapivet-ai.git
-   cd hapivet-ai
+   git clone https://github.com/vishnushanigaram/hapivet.git
+   cd hapivet
